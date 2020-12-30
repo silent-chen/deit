@@ -218,7 +218,11 @@ def save_on_master(*args, **kwargs):
 
 
 def init_distributed_mode(args):
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+    if 'OMPI_COMM_WORLD_RANK' in os.environ:
+        args.rank = os.environ.get('OMPI_COMM_WORLD_RANK')
+        args.world_size = os.environ.get('OMPI_COMM_WORLD_SIZE')
+        args.gpu = args.rank % torch.cuda.device_count()
+    elif 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ['WORLD_SIZE'])
         args.gpu = int(os.environ['LOCAL_RANK'])

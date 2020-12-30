@@ -11,7 +11,7 @@ import time
 import torch
 import torch.backends.cudnn as cudnn
 import json
-
+import os
 from pathlib import Path
 
 from timm.data import Mixup
@@ -20,19 +20,22 @@ from timm.loss import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 from timm.utils import NativeScaler, get_state_dict, ModelEma
-
+from timm.data import DatasetTar
 from datasets import build_dataset
 from engine import train_one_epoch, evaluate
 from samplers import RASampler
 import models
 import utils
-
+from datasets import build_transform
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
     parser.add_argument('--batch-size', default=64, type=int)
     parser.add_argument('--epochs', default=300, type=int)
 
+    # custom parameters
+    parser.add_argument('--platform', default='pai', type=str, choices=['itp', 'pai'],
+                        help='Name of model to train')
     # Model parameters
     parser.add_argument('--model', default='deit_base_patch16_224', type=str, metavar='MODEL',
                         help='Name of model to train')
@@ -162,6 +165,12 @@ def get_args_parser():
 
 
 def main(args):
+
+    if args.platform == 'AML':
+        args.dist_url = 'tcp://' + os.environ['AZ_BATCHAI_MPI_MASTER_NODE'] + ":" + '23452'
+    elif args.platform == 'itp':
+        args.dist_url  = 'tcp://' + os.environ['AZ_BATCH_MASTER_NODE'] + ":" + '23452'
+
     utils.init_distributed_mode(args)
 
     print(args)
@@ -175,9 +184,17 @@ def main(args):
     # random.seed(seed)
 
     cudnn.benchmark = True
-
-    dataset_train, args.nb_classes = build_dataset(is_train=True, args=args)
-    dataset_val, _ = build_dataset(is_train=False, args=args)
+    if args.platform in ['itp', 'aml']:
+        train_dir = os.path.join(args.data_path, 'train.tar')
+        train_transform = build_transform(True, args)
+        dataset_train = DatasetTar(train_dir, transform=train_transform)
+        args.nb_classes = 1000
+        val_transform = build_transform(False, args)
+        eval_dir = os.path.join(args.data_path, 'val.tar')
+        dataset_val = DatasetTar(eval_dir,transform=val_transform)
+    else:
+        dataset_train, args.nb_classes = build_dataset(is_train=True, args=args)
+        dataset_val, _ = build_dataset(is_train=False, args=args)
 
     if True:  # args.distributed:
         num_tasks = utils.get_world_size()
@@ -263,6 +280,8 @@ def main(args):
         criterion = torch.nn.CrossEntropyLoss()
 
     output_dir = Path(args.output_dir)
+    if not output_dir.exists():
+        output_dir.mkdir(parents=True)
     if args.resume:
         if args.resume.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
