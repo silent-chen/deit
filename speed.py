@@ -46,7 +46,7 @@ def main():
             if run == runs_warm_up:
                 start_time = time.time()
     time_eclapse = time.time() - start_time
-    print("Avarage images/s for 30 runs is : {} images/s".format((final_runs-runs_warm_up)*batch_size/time_eclapse))
+    print("Avarage images/s for 30 runs is : {} images/s , total time: {}, total images: {}".format((final_runs-runs_warm_up)*batch_size/time_eclapse, time_eclapse, (final_runs-runs_warm_up)*batch_size))
 
 if __name__ == "__main__":
     main()
