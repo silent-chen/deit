@@ -19,6 +19,8 @@ def main():
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--warm-up', type=int, default=5)
     parser.add_argument('--total-runs', type=int, default=35)
+    parser.add_argument('--image-size', type=int, default=224)
+
     args = parser.parse_args()
     device = 'cuda:0'
     torch.cuda.set_device(device)
@@ -31,8 +33,8 @@ def main():
                          drop_block_rate=args.drop_block,
                          )
     model = model.cuda()
-    inputs = torch.randn(batch_size, 3, 224, 224).cuda()
-    macs, params = get_model_complexity_info(model, (3, 224, 224), as_strings=True,
+    inputs = torch.randn(batch_size, 3, args.image_size, args.image_size).cuda()
+    macs, params = get_model_complexity_info(model, (3, args.image_size, args.image_size), as_strings=True,
                                              print_per_layer_stat=True, verbose=True)
     print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
     print('{:<30}  {:<8}'.format('Number of parameters: ', params))
