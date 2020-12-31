@@ -16,9 +16,11 @@ def main():
                         help='Drop path rate (default: 0.1)')
     parser.add_argument('--drop-block', type=float, default=None, metavar='PCT',
                         help='Drop block rate (default: None)')
+    parser.add_argument('--batch-size', type=int, default=128)
     args = parser.parse_args()
     device = 'cuda:0'
     torch.cuda.set_device(device)
+    batch_size = args.batch_size
     model = create_model(model_name=args.model,
                          num_classes=args.num_classes,
                          pretrained=False,
@@ -27,7 +29,7 @@ def main():
                          drop_block_rate=args.drop_block,
                          )
     model = model.cuda()
-    inputs = torch.randn(100, 3, 224, 224).cuda()
+    inputs = torch.randn(batch_size, 3, 224, 224).cuda()
     macs, params = get_model_complexity_info(model, (3, 224, 224), as_strings=True,
                                              print_per_layer_stat=True, verbose=True)
     print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
@@ -42,7 +44,7 @@ def main():
             if run == runs_warm_up:
                 start_time = time.time()
     time_eclapse = time.time() - start_time
-    print("Avarage running time for 30 runs is : {} s".format(time_eclapse))
+    print("Avarage images/s for 30 runs is : {} images/s".format(batch_size/time_eclapse))
 
 if __name__ == "__main__":
     main()
