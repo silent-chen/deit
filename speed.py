@@ -17,6 +17,8 @@ def main():
     parser.add_argument('--drop-block', type=float, default=None, metavar='PCT',
                         help='Drop block rate (default: None)')
     parser.add_argument('--batch-size', type=int, default=128)
+    parser.add_argument('--warm-up', type=int, default=5)
+    parser.add_argument('--total-runs', type=int, default=35)
     args = parser.parse_args()
     device = 'cuda:0'
     torch.cuda.set_device(device)
@@ -34,8 +36,8 @@ def main():
                                              print_per_layer_stat=True, verbose=True)
     print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
     print('{:<30}  {:<8}'.format('Number of parameters: ', params))
-    runs_warm_up = 5
-    final_runs = 35
+    runs_warm_up = args.warm_up
+    final_runs = args.total_runs
     start_time = time.time()
     model.eval()
     with torch.no_grad():
@@ -44,7 +46,7 @@ def main():
             if run == runs_warm_up:
                 start_time = time.time()
     time_eclapse = time.time() - start_time
-    print("Avarage images/s for 30 runs is : {} images/s".format(batch_size/time_eclapse))
+    print("Avarage images/s for 30 runs is : {} images/s".format((final_runs-runs_warm_up)*batch_size/time_eclapse))
 
 if __name__ == "__main__":
     main()
