@@ -235,6 +235,7 @@ def main(args):
     print(f"Creating model: {args.model}")
     model = create_model(
         args.model,
+        img_size=args.input_size,
         pretrained=False,
         num_classes=args.nb_classes,
         drop_rate=args.drop,
@@ -259,9 +260,12 @@ def main(args):
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
-
+    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print('number of params:', n_parameters)
     linear_scaled_lr = args.lr * args.batch_size * utils.get_world_size() / 512.0
     args.lr = linear_scaled_lr
+    optimizer = create_optimizer(args, model)
+
     loss_scaler = NativeScaler()
 
 
@@ -284,24 +288,30 @@ def main(args):
                 args.resume, map_location='cpu', check_hash=True)
         else:
             checkpoint = torch.load(args.resume, map_location='cpu')
+        pos_embed = checkpoint['model']['pos_embed']
+        _, N, C = pos_embed.shape
+        class_pos_embed = pos_embed[:, 0, :].unsqueeze(1)
+        pos_embed = pos_embed.permute(0, 2, 1)[:, :, 1:].reshape(1, -1, 14, 14)
+        interpolate_pos_embed = torch.nn.functional \
+            .interpolate(pos_embed, size=(args.input_size // 16, args.input_size // 16), mode='bicubic') \
+            .reshape(1, C, -1).permute(0, 2, 1)
+        interpolate_pos_embed = torch.cat([class_pos_embed, interpolate_pos_embed], dim=1)
+        checkpoint['model']['pos_embed'] = interpolate_pos_embed
         model_without_ddp.load_state_dict(checkpoint['model'])
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             args.start_epoch = checkpoint['epoch'] + 1
             if args.model_ema:
                 utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
-    _, N, C = model_without_ddp.pos_embed.shape
-    class_pos_embed =  model_without_ddp.pos_embed[:,0,:].unsqueeze(1)
-    pos_embed = model_without_ddp.pos_embed.permute(0, 2, 1)[:,:, 1:].reshape(1, -1 ,14 , 14)
-    interpolate_pos_embed = torch.nn.functional\
-        .interpolate(pos_embed, size =(args.input_size//16, args.input_size//16), mode='bicubic')\
-        .reshape(1, C, -1).permute(0, 2, 1)
-    interpolate_pos_embed = torch.cat([class_pos_embed, interpolate_pos_embed], dim=1)
+    # _, N, C = model_without_ddp.pos_embed.shape
+    # class_pos_embed =  model_without_ddp.pos_embed[:,0,:].unsqueeze(1)
+    # pos_embed = model_without_ddp.pos_embed.permute(0, 2, 1)[:,:, 1:].reshape(1, -1 ,14 , 14)
+    # interpolate_pos_embed = torch.nn.functional\
+    #     .interpolate(pos_embed, size =(args.input_size//16, args.input_size//16), mode='bicubic')\
+    #     .reshape(1, C, -1).permute(0, 2, 1)
+    # interpolate_pos_embed = torch.cat([class_pos_embed, interpolate_pos_embed], dim=1)
 
-    model_without_ddp.pos_embed = nn.Parameter(interpolate_pos_embed)
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('number of params:', n_parameters)
-    optimizer = create_optimizer(args, model)
+    # model_without_ddp.pos_embed = nn.Parameter(interpolate_pos_embed)
 
     if args.resume:
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
