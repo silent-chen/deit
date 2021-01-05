@@ -29,7 +29,7 @@ import utils
 from datasets import build_transform
 import torch.nn as nn
 def get_args_parser():
-    parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
+    parser = argparse.ArgumentParser('DeiT finetune script', add_help=False)
     parser.add_argument('--batch-size', default=64, type=int)
     parser.add_argument('--epochs', default=300, type=int)
 
@@ -178,11 +178,11 @@ def main(args):
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
-    seed = args.seed
+    seed = args.seed + utils.get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
     # random.seed(seed)
-    print(seed)
+
     cudnn.benchmark = True
     if args.platform in ['itp', 'aml']:
         train_dir = os.path.join(args.data_path, 'train.tar')
@@ -259,15 +259,11 @@ def main(args):
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('number of params:', n_parameters)
 
     linear_scaled_lr = args.lr * args.batch_size * utils.get_world_size() / 512.0
     args.lr = linear_scaled_lr
-    optimizer = create_optimizer(args, model)
     loss_scaler = NativeScaler()
 
-    lr_scheduler, _ = create_scheduler(args, optimizer)
 
     criterion = LabelSmoothingCrossEntropy()
 
@@ -282,7 +278,6 @@ def main(args):
     output_dir = Path(args.output_dir)
     if not output_dir.exists():
         output_dir.mkdir(parents=True)
-
     if args.resume:
         if args.resume.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
@@ -291,11 +286,32 @@ def main(args):
             checkpoint = torch.load(args.resume, map_location='cpu')
         model_without_ddp.load_state_dict(checkpoint['model'])
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
+            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            args.start_epoch = checkpoint['epoch'] + 1
+            if args.model_ema:
+                utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
+    _, N, C = model_without_ddp.pos_embed.shape
+    class_pos_embed =  model_without_ddp.pos_embed[:,0,:].unsqueeze(1)
+    pos_embed = model_without_ddp.pos_embed.permute(0, 2, 1)[:,:, 1:].reshape(1, -1 ,14 , 14)
+    interpolate_pos_embed = torch.nn.functional\
+        .interpolate(pos_embed, size =(args.input_size//16, args.input_size//16), mode='bicubic')\
+        .reshape(1, C, -1).permute(0, 2, 1)
+    interpolate_pos_embed = torch.cat([class_pos_embed, interpolate_pos_embed], dim=1)
+
+    model_without_ddp.pos_embed = nn.Parameter(interpolate_pos_embed)
+    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print('number of params:', n_parameters)
+    optimizer = create_optimizer(args, model)
+
+    if args.resume:
+        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
             args.start_epoch = checkpoint['epoch'] + 1
             if args.model_ema:
                 utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
+
+    lr_scheduler, _ = create_scheduler(args, optimizer)
 
     if args.eval:
         test_stats = evaluate(data_loader_val, model, device)
