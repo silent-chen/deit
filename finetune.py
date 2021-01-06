@@ -298,11 +298,7 @@ def main(args):
         interpolate_pos_embed = torch.cat([class_pos_embed, interpolate_pos_embed], dim=1)
         checkpoint['model']['pos_embed'] = interpolate_pos_embed
         model_without_ddp.load_state_dict(checkpoint['model'])
-        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-            args.start_epoch = checkpoint['epoch'] + 1
-            if args.model_ema:
-                utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
+
     # _, N, C = model_without_ddp.pos_embed.shape
     # class_pos_embed =  model_without_ddp.pos_embed[:,0,:].unsqueeze(1)
     # pos_embed = model_without_ddp.pos_embed.permute(0, 2, 1)[:,:, 1:].reshape(1, -1 ,14 , 14)
@@ -315,9 +311,9 @@ def main(args):
 
     if args.resume:
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-            args.start_epoch = checkpoint['epoch'] + 1
+            # optimizer.load_state_dict(checkpoint['optimizer'])
+            # lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            # args.start_epoch = checkpoint['epoch'] + 1
             if args.model_ema:
                 utils._load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
 
