@@ -38,6 +38,7 @@ def get_args_parser():
                         help='Name of model to train')
     parser.add_argument('--teacher_model', default='', type=str,
                         help='Name of teacher model to train')
+    parser.add_argument('--normalization', action='store_true')
     # Model parameters
     parser.add_argument('--model', default='deit_base_patch16_224', type=str, metavar='MODEL',
                         help='Name of model to train')
@@ -249,6 +250,7 @@ def main(args):
         drop_rate=args.drop,
         drop_path_rate=args.drop_path,
         drop_block_rate=args.drop_block,
+        normalization=args.normalization
     )
 
     # TODO: finetuning
