@@ -116,7 +116,6 @@ class Attention(nn.Module):
         if self.normalization:
             q = q / torch.norm(q, dim=-1, keepdim=True)
             k = k / torch.norm(k, dim=-1, keepdim=True)
-            print("??????")
             attn = (q @ k.transpose(-2, -1))
         else:
             attn = (q @ k.transpose(-2, -1)) * self.scale
