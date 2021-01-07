@@ -15,14 +15,16 @@ import torch
 
 from timm.data import Mixup
 from timm.utils import accuracy, ModelEma
-
+from timm.loss import LabelSmoothingCrossEntropy
 import utils
-
+import torch.nn.functional as F
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
-                    model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None, amp=True):
+                    model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None,
+                    amp: bool = True, teacher_model: torch.nn.Module = None,
+                    teach_loss: torch.nn.Module = None):
     # TODO fix this for finetuning
     model.train()
     criterion.train()
@@ -40,10 +42,22 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if amp:
             with torch.cuda.amp.autocast():
                 outputs = model(samples)
-                loss = criterion(outputs, targets)
+                if teacher_model:
+                    with torch.no_grad():
+                        teach_output = teacher_model(samples)
+                    _, teacher_label = teach_output.topk(1, 1, True, True)
+                    loss = 1/2 * criterion(outputs, targets) + 1/2 * teach_loss(outputs, teacher_label.squeeze())
+                else:
+                    loss = criterion(outputs, targets)
         else:
             outputs = model(samples)
-            loss = criterion(outputs, targets)
+            if teacher_model:
+                with torch.no_grad():
+                    teach_output = teacher_model(samples)
+                _, teacher_label = teach_output.topk(1, 1, True, True)
+                loss = 1 / 2 * criterion(outputs, targets) + 1 / 2 * teach_loss(outputs, teacher_label.squeeze())
+            else:
+                loss = criterion(outputs, targets)
 
         loss_value = loss.item()
 

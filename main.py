@@ -36,6 +36,8 @@ def get_args_parser():
     # custom parameters
     parser.add_argument('--platform', default='pai', type=str, choices=['itp', 'pai'],
                         help='Name of model to train')
+    parser.add_argument('--teacher_model', default='', type=str,
+                        help='Name of teacher model to train')
     # Model parameters
     parser.add_argument('--model', default='deit_base_patch16_224', type=str, metavar='MODEL',
                         help='Name of model to train')
@@ -252,6 +254,18 @@ def main(args):
     # TODO: finetuning
 
     model.to(device)
+    if args.teacher_model:
+        teacher_model = create_model(
+            args.teacher_model,
+            pretrained=True,
+            num_classes=args.nb_classes,
+        )
+        teacher_model.to(device)
+        teacher_loss = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
+
+    else:
+        teacher_model = None
+        teacher_loss = None
 
     model_ema = None
     if args.model_ema:
@@ -266,6 +280,7 @@ def main(args):
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
+
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
 
@@ -319,7 +334,9 @@ def main(args):
         train_stats = train_one_epoch(
             model, criterion, data_loader_train,
             optimizer, device, epoch, loss_scaler,
-            args.clip_grad, model_ema, mixup_fn, amp=args.amp
+            args.clip_grad, model_ema, mixup_fn,
+            amp=args.amp, teacher_model=teacher_model,
+            teach_loss=teacher_loss,
         )
 
         lr_scheduler.step(epoch)
