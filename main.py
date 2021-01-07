@@ -161,6 +161,8 @@ def get_args_parser():
     parser.add_argument('--world_size', default=1, type=int,
                         help='number of distributed processes')
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
+    parser.add_argument('--no-amp', action='store_true', default=False,
+                        help='Do not use')
     return parser
 
 
@@ -175,6 +177,12 @@ def main(args):
 
     print(args)
 
+    # amp training or not
+    if args.no_amp:
+        args.amp = False
+    else:
+        args.amp = True
+
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
@@ -182,7 +190,6 @@ def main(args):
     torch.manual_seed(seed)
     np.random.seed(seed)
     # random.seed(seed)
-    print(seed)
     cudnn.benchmark = True
     if args.platform in ['itp', 'aml']:
         train_dir = os.path.join(args.data_path, 'train.tar')
@@ -312,7 +319,7 @@ def main(args):
         train_stats = train_one_epoch(
             model, criterion, data_loader_train,
             optimizer, device, epoch, loss_scaler,
-            args.clip_grad, model_ema, mixup_fn
+            args.clip_grad, model_ema, mixup_fn, amp=args.amp
         )
 
         lr_scheduler.step(epoch)
@@ -327,7 +334,7 @@ def main(args):
                     'model_ema': get_state_dict(model_ema),
                     'args': args,
                 }, checkpoint_path)
-        test_stats = evaluate(data_loader_val, model, device)
+        test_stats = evaluate(data_loader_val, model, device, amp=args.amp)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         max_accuracy = max(max_accuracy, test_stats["acc1"])
         print(f'Max accuracy: {max_accuracy:.2f}%')

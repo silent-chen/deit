@@ -22,7 +22,7 @@ import utils
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
-                    model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None):
+                    model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None, amp=True):
     # TODO fix this for finetuning
     model.train()
     criterion.train()
@@ -37,8 +37,11 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         if mixup_fn is not None:
             samples, targets = mixup_fn(samples, targets)
-
-        with torch.cuda.amp.autocast():
+        if amp:
+            with torch.cuda.amp.autocast():
+                outputs = model(samples)
+                loss = criterion(outputs, targets)
+        else:
             outputs = model(samples)
             loss = criterion(outputs, targets)
 
@@ -46,14 +49,18 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
-            sys.exit(1)
+            continue
 
         optimizer.zero_grad()
 
         # this attribute is added by timm on one optimizer (adahessian)
-        is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-        loss_scaler(loss, optimizer, clip_grad=max_norm,
+        if amp:
+            is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
+            loss_scaler(loss, optimizer, clip_grad=max_norm,
                     parameters=model.parameters(), create_graph=is_second_order)
+        else:
+            loss.backward()
+            optimizer.step()
 
         torch.cuda.synchronize()
         if model_ema is not None:
@@ -68,7 +75,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(data_loader, model, device):
+def evaluate(data_loader, model, device, amp=True):
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -82,7 +89,11 @@ def evaluate(data_loader, model, device):
         target = target.to(device, non_blocking=True)
 
         # compute output
-        with torch.cuda.amp.autocast():
+        if amp:
+            with torch.cuda.amp.autocast():
+                output = model(images)
+                loss = criterion(output, target)
+        else:
             output = model(images)
             loss = criterion(output, target)
 
