@@ -38,6 +38,7 @@ def get_args_parser():
                         help='Name of model to train')
     parser.add_argument('--teacher_model', default='', type=str,
                         help='Name of teacher model to train')
+    parser.add_argument('--distill_token', action='store_true')
     parser.add_argument('--normalization', action='store_true')
     # Model parameters
     parser.add_argument('--model', default='deit_base_patch16_224', type=str, metavar='MODEL',
@@ -250,7 +251,8 @@ def main(args):
         drop_rate=args.drop,
         drop_path_rate=args.drop_path,
         drop_block_rate=args.drop_block,
-        normalization=args.normalization
+        normalization=args.normalization,
+        distill_token=args.distill_token
     )
 
     # TODO: finetuning
@@ -338,7 +340,7 @@ def main(args):
             optimizer, device, epoch, loss_scaler,
             args.clip_grad, model_ema, mixup_fn,
             amp=args.amp, teacher_model=teacher_model,
-            teach_loss=teacher_loss,
+            teach_loss=teacher_loss, distill_token=args.distill_token,
         )
 
         lr_scheduler.step(epoch)
@@ -353,7 +355,7 @@ def main(args):
                     'model_ema': get_state_dict(model_ema),
                     'args': args,
                 }, checkpoint_path)
-        test_stats = evaluate(data_loader_val, model, device, amp=args.amp)
+        test_stats = evaluate(data_loader_val, model, device, amp=args.amp, distill_token=args.distill_token)
         print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
         max_accuracy = max(max_accuracy, test_stats["acc1"])
         print(f'Max accuracy: {max_accuracy:.2f}%')

@@ -24,7 +24,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
                     model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None,
                     amp: bool = True, teacher_model: torch.nn.Module = None,
-                    teach_loss: torch.nn.Module = None):
+                    teach_loss: torch.nn.Module = None, distill_token: bool=False):
     # TODO fix this for finetuning
     model.train()
     criterion.train()
@@ -41,13 +41,18 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             samples, targets = mixup_fn(samples, targets)
         if amp:
             with torch.cuda.amp.autocast():
-                outputs = model(samples)
                 if teacher_model:
                     with torch.no_grad():
                         teach_output = teacher_model(samples)
                     _, teacher_label = teach_output.topk(1, 1, True, True)
-                    loss = 1/2 * criterion(outputs, targets) + 1/2 * teach_loss(outputs, teacher_label.squeeze())
+                    if distill_token:
+                        output_cls, output_dis = model(samples)
+                        loss = 1/2 * criterion(output_cls, targets) + 1/2 * teach_loss(output_dis, teacher_label.squeeze())
+                    else:
+                        outputs = model(samples)
+                        loss = 1/2 * criterion(outputs, targets) + 1/2 * teach_loss(outputs, teacher_label.squeeze())
                 else:
+                    outputs = model(samples)
                     loss = criterion(outputs, targets)
         else:
             outputs = model(samples)
@@ -89,7 +94,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(data_loader, model, device, amp=True):
+def evaluate(data_loader, model, device, amp=True, distill_token=False):
     criterion = torch.nn.CrossEntropyLoss()
 
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -105,10 +110,18 @@ def evaluate(data_loader, model, device, amp=True):
         # compute output
         if amp:
             with torch.cuda.amp.autocast():
-                output = model(images)
+                if distill_token:
+                    output_cls, output_dis = model(images)
+                    output = (output_cls + output_dis)/2
+                else:
+                    output = model(images)
                 loss = criterion(output, target)
         else:
-            output = model(images)
+            if distill_token:
+                output_cls, output_dis = model(images)
+                output = (output_cls + output_dis) / 2
+            else:
+                output = model(images)
             loss = criterion(output, target)
 
         acc1, acc5 = accuracy(output, target, topk=(1, 5))

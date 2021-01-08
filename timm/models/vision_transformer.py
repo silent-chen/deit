@@ -211,11 +211,11 @@ class VisionTransformer(nn.Module):
     """
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-                 drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm, normalization=False):
+                 drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm, normalization=False, distill_token=False):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
-
+        self.distill_token = None
         if hybrid_backbone is not None:
             self.patch_embed = HybridEmbed(
                 hybrid_backbone, img_size=img_size, in_chans=in_chans, embed_dim=embed_dim)
@@ -223,9 +223,15 @@ class VisionTransformer(nn.Module):
             self.patch_embed = PatchEmbed(
                 img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
-
+        if distill_token:
+            self.distill_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+
+        if distill_token:
+            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 2, embed_dim))
+        else:
+            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
@@ -242,7 +248,8 @@ class VisionTransformer(nn.Module):
 
         # Classifier head
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
-
+        if distill_token:
+            self.distill_head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         trunc_normal_(self.pos_embed, std=.02)
         trunc_normal_(self.cls_token, std=.02)
         self.apply(self._init_weights)
@@ -272,20 +279,35 @@ class VisionTransformer(nn.Module):
         x = self.patch_embed(x)
 
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
-        x = torch.cat((cls_tokens, x), dim=1)
-        x = x + self.pos_embed
+        if self.distill_token is not None:
+            distill_tokens = self.distill_token.expand(B, -1, -1)
+            x = torch.cat((cls_tokens, x, distill_tokens), dim=1)
+            x = x + self.pos_embed
+        else:
+            x = torch.cat((cls_tokens, x), dim=1)
+            x = x + self.pos_embed
+
         x = self.pos_drop(x)
 
         for blk in self.blocks:
             x = blk(x)
 
         x = self.norm(x)
-        return x[:, 0]
+        if self.distill_token is not None:
+            return x[:, 0], x[:, -1]
+        else:
+            return x[:, 0]
 
     def forward(self, x):
-        x = self.forward_features(x)
-        x = self.head(x)
-        return x
+        if self.distill_token is not None:
+            x0, x1 = self.forward_features(x)
+            x0 = self.head(x0)
+            x1 = self.distill_head(x1)
+            return x0, x1
+        else:
+            x = self.forward_features(x)
+            x = self.head(x)
+            return x
 
 
 def _conv_filter(state_dict, patch_size=16):
