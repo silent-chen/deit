@@ -292,8 +292,15 @@ def main(args):
     args.lr = linear_scaled_lr
     optimizer = create_optimizer(args, model)
     loss_scaler = NativeScaler()
-
-    lr_scheduler, _ = create_scheduler(args, optimizer)
+    if args.sched == 'onecycle':
+        num_epochs = args.epochs
+        lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=args.lr,
+            steps_per_epoch=len(loader_train),
+            epochs=num_epochs)
+    else:
+        lr_scheduler, _ = create_scheduler(args, optimizer)
 
     criterion = LabelSmoothingCrossEntropy()
 
@@ -340,10 +347,9 @@ def main(args):
             optimizer, device, epoch, loss_scaler,
             args.clip_grad, model_ema, mixup_fn,
             amp=args.amp, teacher_model=teacher_model,
-            teach_loss=teacher_loss, distill_token=args.distill_token,
+            teach_loss=teacher_loss,
+            distill_token=args.distill_token
         )
-
-        lr_scheduler.step(epoch)
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             for checkpoint_path in checkpoint_paths:
