@@ -40,6 +40,8 @@ def get_args_parser():
                         help='Name of teacher model to train')
     parser.add_argument('--distill_token', action='store_true')
     parser.add_argument('--normalization', action='store_true')
+    parser.add_argument('--relative_position', action='store_true')
+
     # Model parameters
     parser.add_argument('--model', default='deit_base_patch16_224', type=str, metavar='MODEL',
                         help='Name of model to train')
@@ -252,7 +254,8 @@ def main(args):
         drop_path_rate=args.drop_path,
         drop_block_rate=args.drop_block,
         normalization=args.normalization,
-        distill_token=args.distill_token
+        distill_token=args.distill_token,
+        relative_position=args.relative_position
     )
 
     # TODO: finetuning
@@ -266,7 +269,6 @@ def main(args):
         )
         teacher_model.to(device)
         teacher_loss = LabelSmoothingCrossEntropy(smoothing=args.smoothing)
-
     else:
         teacher_model = None
         teacher_loss = None

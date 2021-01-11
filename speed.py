@@ -1,11 +1,14 @@
 from timm.models import create_model
+from timm.models.vision_transformer import VisionTransformer
 import torch
 import torch.nn as nn
 import time
 import argparse
 import models
 from ptflops import get_model_complexity_info
+from functools import partial
 
+from timm.models.vision_transformer import VisionTransformer, _cfg
 def main():
     parser = argparse.ArgumentParser('Training speed test', add_help=False)
     parser.add_argument('--model', default='deit_base_patch16_224', type=str)
@@ -25,6 +28,11 @@ def main():
     device = 'cuda:0'
     torch.cuda.set_device(device)
     batch_size = args.batch_size
+    # model = VisionTransformer(
+    #     patch_size=16, embed_dim=256, depth=8, num_heads=4, mlp_ratio=4, qkv_bias=True,
+    #     norm_layer=partial(nn.LayerNorm, eps=1e-6), drop_rate=args.drop, drop_path_rate=args.drop_path,)
+    # model.default_cfg = _cfg()
+
     model = create_model(model_name=args.model,
                          num_classes=args.num_classes,
                          pretrained=False,

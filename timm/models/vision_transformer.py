@@ -94,16 +94,49 @@ class Mlp(nn.Module):
         x = self.drop(x)
         return x
 
+class RelativePosition2D(nn.Module):
+
+    def __init__(self, num_units, max_relative_position):
+        super().__init__()
+        self.num_units = num_units
+        self.max_relative_position = max_relative_position
+        self.embeddings_table_v = nn.Parameter(torch.Tensor(max_relative_position * 2 + 1, num_units))
+        self.embeddings_table_h = nn.Parameter(torch.Tensor(max_relative_position * 2 + 1, num_units))
+
+        nn.init.xavier_uniform_(self.embeddings_table_v)
+        nn.init.xavier_uniform_(self.embeddings_table_h)
+
+    def forward(self, length_q, length_k):
+        range_vec_q = torch.arange(length_q)
+        range_vec_k = torch.arange(length_k)
+        distance_mat = (range_vec_k[None, :] - range_vec_q[:, None]) % torch.sqrt(length_q)
+        distance_mat_clipped_v = torch.clamp(distance_mat, -self.max_relative_position, self.max_relative_position)
+        distance_mat_clipped_h = torch.clamp(distance_mat, -self.max_relative_position, self.max_relative_position).transpose()
+
+        final_mat_v = distance_mat_clipped_v + self.max_relative_position
+        final_mat_h = distance_mat_clipped_h + self.max_relative_position
+
+        final_mat_v = torch.LongTensor(final_mat_v).cuda()
+        final_mat_h = torch.LongTensor(final_mat_h).cuda()
+        embeddings = (self.embeddings_table_v[final_mat_v].cuda()) + (self.embeddings_table_h[final_mat_h].cuda())
+
+        return embeddings
 
 class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., normalization = False):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., normalization = False, relative_position = False, num_patches = None, max_relative_position=7):
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.normalization = normalization
         # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
         self.scale = qk_scale or head_dim ** -0.5
-
+        self.relative_position = relative_position
+        if self.relative_position:
+            self.rel_pos_embed_k = RelativePosition2D(head_dim, max_relative_position)
+            self.rel_pos_embed_v = RelativePosition2D(head_dim, max_relative_position)
+            # self.relative_position_v = RelativePosition(i, self.d_v, max_relative_position)
+            # self.rel_pos_embed_k = nn.Parameter(torch.zeros(2 * max_relative_position + 1, 2 * max_relative_position + 1, head_dim))
+            # self.rel_pos_embed_v = nn.Parameter(torch.zeros(2*k + 1, 2*k + 1, head_dim))
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
@@ -121,8 +154,12 @@ class Attention(nn.Module):
             attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
-
+        if self.relative_position:
+            r_p_k = self.rel_pos_embed_k(C // self.num_heads, C // self.num_heads)
+            attn = attn + (k.unsqueeze(-2) @ self.rel_pos_embed_k.permute(0, 2, 1)).squeeze()
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        if self.relative_position:
+            x = x + ((attn.unsqueeze(-2) @ self.rel_pos_embed_v).squeeze()).transpose(1,2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -131,11 +168,12 @@ class Attention(nn.Module):
 class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, normalization = False):
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, normalization = False, num_patches=None, relative_position=False):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop, normalization=normalization)
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop,
+            normalization=normalization, num_patches=num_patches, relative_position=relative_position)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -211,7 +249,8 @@ class VisionTransformer(nn.Module):
     """
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-                 drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm, normalization=False, distill_token=False):
+                 drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm,
+                 normalization=False, distill_token=False, relative_position=False):
         super().__init__()
         self.num_classes = num_classes
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
@@ -238,7 +277,8 @@ class VisionTransformer(nn.Module):
         self.blocks = nn.ModuleList([
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, normalization=normalization)
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
+                normalization=normalization, num_patches=self.pos_embed.size()[1], relative_position=relative_position)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
