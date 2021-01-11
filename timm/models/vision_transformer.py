@@ -98,27 +98,36 @@ class RelativePosition2D(nn.Module):
 
     def __init__(self, num_units, max_relative_position):
         super().__init__()
+
         self.num_units = num_units
         self.max_relative_position = max_relative_position
-        self.embeddings_table_v = nn.Parameter(torch.Tensor(max_relative_position * 2 + 1, num_units))
-        self.embeddings_table_h = nn.Parameter(torch.Tensor(max_relative_position * 2 + 1, num_units))
+        # The first element in embeddings_table_v is the vertical embedding for the class
+        self.embeddings_table_v = nn.Parameter(torch.randn(max_relative_position * 2 + 2, num_units))
+        self.embeddings_table_h = nn.Parameter(torch.randn(max_relative_position * 2 + 2, num_units))
 
-        nn.init.xavier_uniform_(self.embeddings_table_v)
-        nn.init.xavier_uniform_(self.embeddings_table_h)
+        # self.embeddings_table_v = nn.Embedding(max_relative_position * 2 + 1, num_units)
+        # self.embeddings_table_h = nn.Embedding(max_relative_position * 2 + 1, num_units)
+        # self.cls_position_embedding = nn.Parameter(torch.zeros(1, num_units))
 
     def forward(self, length_q, length_k):
+        length_q = length_q - 1
+        length_k = length_k - 1
         range_vec_q = torch.arange(length_q)
         range_vec_k = torch.arange(length_k)
-        distance_mat = (range_vec_k[None, :] - range_vec_q[:, None]) % torch.sqrt(length_q)
-        distance_mat_clipped_v = torch.clamp(distance_mat, -self.max_relative_position, self.max_relative_position)
-        distance_mat_clipped_h = torch.clamp(distance_mat, -self.max_relative_position, self.max_relative_position).transpose()
+        distance_mat_v = (range_vec_k[None, :] // int(length_q ** 0.5 )  - range_vec_q[:, None] // int(length_q ** 0.5 ))
+        distance_mat_h = (range_vec_k[None, :] % int(length_q ** 0.5 ) - range_vec_q[:, None] % int(length_q ** 0.5 ))
 
-        final_mat_v = distance_mat_clipped_v + self.max_relative_position
-        final_mat_h = distance_mat_clipped_h + self.max_relative_position
+        distance_mat_clipped_v = torch.clamp(distance_mat_v, -self.max_relative_position, self.max_relative_position)
+        distance_mat_clipped_h = torch.clamp(distance_mat_h, -self.max_relative_position, self.max_relative_position)
+
+        final_mat_v = distance_mat_clipped_v + self.max_relative_position + 1
+        final_mat_h = distance_mat_clipped_h + self.max_relative_position + 1
+        final_mat_v = torch.nn.functional.pad(final_mat_v, (1,0,1,0), "constant", 0)
+        final_mat_h = torch.nn.functional.pad(final_mat_h, (1,0,1,0), "constant", 0)
 
         final_mat_v = torch.LongTensor(final_mat_v).cuda()
         final_mat_h = torch.LongTensor(final_mat_h).cuda()
-        embeddings = (self.embeddings_table_v[final_mat_v].cuda()) + (self.embeddings_table_h[final_mat_h].cuda())
+        embeddings = self.embeddings_table_v[final_mat_v] + self.embeddings_table_h[final_mat_h]
 
         return embeddings
 
@@ -154,12 +163,15 @@ class Attention(nn.Module):
             attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
+        # relative
         if self.relative_position:
-            r_p_k = self.rel_pos_embed_k(C // self.num_heads, C // self.num_heads)
-            attn = attn + (k.unsqueeze(-2) @ self.rel_pos_embed_k.permute(0, 2, 1)).squeeze()
+            r_p_k = self.rel_pos_embed_k(N, N)
+            attn = attn + (k.unsqueeze(-2) @ r_p_k.permute(0, 2, 1)).squeeze()
+
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         if self.relative_position:
-            x = x + ((attn.unsqueeze(-2) @ self.rel_pos_embed_v).squeeze()).transpose(1,2).reshape(B, N, C)
+            r_p_v = self.rel_pos_embed_v(N, N)
+            x = x + ((attn.unsqueeze(-2) @ r_p_v).squeeze()).transpose(1,2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
