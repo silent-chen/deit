@@ -41,7 +41,7 @@ def get_args_parser():
     parser.add_argument('--distill_token', action='store_true')
     parser.add_argument('--normalization', action='store_true')
     parser.add_argument('--relative_position', action='store_true')
-
+    parser.add_argument('--max_relative_position', type=int, default=14, help='max distance in relative position embedding')
     # Model parameters
     parser.add_argument('--model', default='deit_base_patch16_224', type=str, metavar='MODEL',
                         help='Name of model to train')
@@ -267,7 +267,8 @@ def main(args):
         drop_block_rate=args.drop_block,
         normalization=args.normalization,
         distill_token=args.distill_token,
-        relative_position=args.relative_position
+        relative_position=args.relative_position,
+        max_relative_position=args.max_relative_position
     )
 
     # TODO: finetuning
