@@ -58,3 +58,7 @@ The itp script is in the `itp` directory. To submit the job to cluster, you shou
 ```
 python azureml_script.py --name ours_small_batch_size_128_8_gpus_lr_1e-3_warmup_epochs_20 --cluster itplabrr1cl1 --gpus 8
 ```
+
+## lr_scheduler
+
+Implemented the polynomial lr scheduler and integrated it with timm LRscheduler class. To use the polynomial LR scheduler, please specify the argument `--sched polynomial` 

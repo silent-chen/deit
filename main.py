@@ -88,6 +88,8 @@ def get_args_parser():
                         help='warmup learning rate (default: 1e-6)')
     parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
+    parser.add_argument('--lr-power', type=float, default=1.0,
+                        help='power of the polynomial lr scheduler')
 
     parser.add_argument('--decay-epochs', type=float, default=30, metavar='N',
                         help='epoch interval to decay LR')
@@ -312,7 +314,7 @@ def main(args):
         lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
             max_lr=args.lr,
-            steps_per_epoch=len(loader_train),
+            steps_per_epoch=len(data_loader_train),
             epochs=num_epochs)
     else:
         lr_scheduler, _ = create_scheduler(args, optimizer)
@@ -365,6 +367,8 @@ def main(args):
             teach_loss=teacher_loss,
             distill_token=args.distill_token
         )
+
+        lr_scheduler.step(epoch)
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
             for checkpoint_path in checkpoint_paths:

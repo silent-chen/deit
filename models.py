@@ -68,7 +68,6 @@ def deit_small_patch16_224(pretrained=False, **kwargs):
         model.load_state_dict(checkpoint["model"])
     return model
 
-
 @register_model
 def deit_base_patch16_224(pretrained=False, **kwargs):
     model = VisionTransformer(
