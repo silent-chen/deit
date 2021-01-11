@@ -54,4 +54,7 @@ python -m torch.distributed.launch --nproc_per_node=8 --use_env main.py --model 
 ```
 ## itp script
 
-The itp script is in the `itp` directory.
+The itp script is in the `itp` directory. To submit the job to cluster, you should specify the `--cluster` and the numbers of gpu you want to use `--gpus`. Here is an example:
+```
+python azureml_script.py --name ours_small_batch_size_128_8_gpus_lr_1e-3_warmup_epochs_20 --cluster itplabrr1cl1 --gpus 8
+```
